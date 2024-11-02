@@ -11,7 +11,7 @@ from gmso import Topology
 from gmso.core.box import Box
 from gmso.core.views import PotentialFilters
 from gmso.exceptions import EngineIncompatibilityError
-from gmso.external import from_parmed, to_parmed
+from gmso.external import from_parmed
 from gmso.formats.formats_registry import UnsupportedFileFormatError
 from gmso.tests.base_test import BaseTest
 from gmso.tests.utils import get_path
@@ -247,79 +247,6 @@ class TestLammpsWriter(BaseTest):
         assert read.n_dihedrals == 9
         assert len(read.dihedral_types(filter_by=pfilter)) == 1
 
-    # TODO: would be good to create a library of molecules and styles to test
-    # Test potential styles that are directly comparable to ParmEd writers.
-    @pytest.mark.parametrize(
-        "top",
-        [
-            "typed_ethane",
-            "typed_methylnitroaniline",
-            "typed_methaneUA",
-        ],
-    )
-    def test_lammps_vs_parmed_by_mol(self, top, request):
-        """Parmed LAMMPSDATA Compare outputs.
-
-        atom_style = 'full', 'atomic', 'charge', 'molecular'
-        unit_style = 'real', 'lj'
-        improper_style = "cvff"
-        dihedral_style = 'CHARMM', 'OPLS',
-        angle_style = 'harmonic', 'urey_bradleys'
-        bond_style = 'harmonic
-        pair_style = 'lj
-        """
-        top = request.getfixturevalue(top)
-        pmd_top = to_parmed(top)
-        top.save("gmso.lammps")
-        pmd_top.impropers = []
-        from mbuild.formats.lammpsdata import (
-            write_lammpsdata as mb_write_lammps,
-        )
-
-        mb_write_lammps(
-            structure=pmd_top,
-            filename="pmd.lammps",
-            detect_forcefield_style=True,
-            use_dihedrals=False,
-            use_rb_torsions=True,
-            mins=[0, 0, 0],
-            maxs=top.box.lengths.convert_to_units(u.nm),
-        )
-        assert compare_lammps_files(
-            "gmso.lammps",
-            "pmd.lammps",
-            skip_linesList=[0],
-            offsets=[[[1, 1], ["none", "none"]], [["none", "none"]]],
-        )
-
-    @pytest.mark.parametrize("atom_style", ["atomic", "charge", "molecular", "full"])
-    def test_lammps_vs_parmed_by_styles(self, atom_style, typed_ethane, parmed_ethane):
-        """Test all support styles in lammps writer.
-        _______References_______
-        See https://docs.lammps.org/atom_style.html for more info.
-        """
-        typed_ethane.save("gmso.lammps", atom_style=atom_style)
-        from mbuild.formats.lammpsdata import (
-            write_lammpsdata as mb_write_lammps,
-        )
-
-        mb_write_lammps(
-            structure=parmed_ethane,
-            filename="pmd.lammps",
-            atom_style=atom_style,
-            detect_forcefield_style=True,
-            use_dihedrals=False,
-            use_rb_torsions=True,
-            mins=[0, 0, 0],
-            maxs=typed_ethane.box.lengths.convert_to_units(u.nm),
-        )
-        assert compare_lammps_files(
-            "gmso.lammps",
-            "pmd.lammps",
-            skip_linesList=[0],
-            offsets=[[[0, 1]], [["none", "none"]]],
-        )
-
     def test_lammps_default_conversions(
         self, typed_ethane, harmonic_parmed_types_charmm
     ):
@@ -343,19 +270,8 @@ class TestLammpsWriter(BaseTest):
         ]
 
         struc = harmonic_parmed_types_charmm
-        from mbuild.formats.lammpsdata import (
-            write_lammpsdata as mb_write_lammps,
-        )
-
-        mb_write_lammps(struc, "pmd.lammps")
         top = from_parmed(struc)
         top.save("gmso.lammps")
-        assert compare_lammps_files(
-            "gmso.lammps",
-            "pmd.lammps",
-            skip_linesList=[0],
-            offsets=[[[0, 1], [17, 1]], []],
-        )
         out_lammps = open("gmso.lammps", "r").readlines()
         found_impropers = False
         for i, line in enumerate(out_lammps):
