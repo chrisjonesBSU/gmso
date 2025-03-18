@@ -295,9 +295,9 @@ def _parse_particle_information(
     charges = u.unyt_array(
         [site.charge if site.charge else 0 * u.elementary_charge for site in top.sites]
     )
-    moits = [tuple([1, 0, 0]) for i in xyz]
+    moits = [[1, 0, 0] for i in xyz]
     # GMSO and mBuild don't store particle orientation; use default
-    orientations = [tuple([1, 0, 0, 0]) for i in xyz]
+    orientations = [[1, 0, 0, 0] for i in xyz]
     unique_types = sorted(list(set(types)))
     typeids = np.array([unique_types.index(t) for t in types])
     # Check for rigid molecules
@@ -314,8 +314,6 @@ def _parse_particle_information(
         rigid_ids = [
             site.molecule.number if site.molecule.isrigid else -1 for site in top.sites
         ]
-        # rigid_ids_set = set([i for i in rigid_ids if i != -1])
-        # n_rigid = len(rigid_ids_set)
         n_rigid_types = len(list(rigid_body_sets.keys()))
         n_rigid = sum([len(mols) for mols in rigid_body_sets.values()])
         rigid_charges = np.zeros(n_rigid) * charges.units
@@ -323,8 +321,6 @@ def _parse_particle_information(
         rigid_xyz = np.zeros((n_rigid, 3)) * xyz.units
         rigid_moits = np.zeros((n_rigid, 3)) * xyz.units
         rigid_orientations = [tuple([1, 0, 0, 0]) for i in rigid_xyz]
-        # Rigid particle type defaults to "R"; add to front of list
-        # unique_types = ["R"] + unique_types
         # Rigid particles get type IDs at the beginning, move all others up
         rigid_type_ids = []
         for i, rigid_type in enumerate(rigid_body_sets.keys()):
@@ -356,8 +352,6 @@ def _parse_particle_information(
                 if idx == 0:
                     const_ids = typeids[group_indices]
                     const_types = [unique_types[i] for i in const_ids]
-                    relative_pos = com_xyz - group_positions
-                    print("relative_pos", relative_pos)
                     rigid_constraint.body[rigid_mol]["constituent_types"].extend(
                         const_types
                     )
@@ -403,7 +397,7 @@ def _parse_particle_information(
         snapshot.particles.orientation[0:] = orientations
         if n_rigid:
             snapshot.particles.body[0:] = rigid_id_tags
-            snapshot.particles.moment_intertia[0:] = moits
+            snapshot.particles.moment_inertia[0:] = moits
     elif isinstance(snapshot, gsd.hoomd.Frame):
         snapshot.particles.N = top.n_sites + n_rigid
         snapshot.particles.types = unique_types
@@ -414,7 +408,7 @@ def _parse_particle_information(
         snapshot.particles.orientation = orientations
         if n_rigid:
             snapshot.particles.body = rigid_id_tags
-            snapshot.particles.moment_intertia = moits
+            snapshot.particles.moment_inertia = moits
     return n_rigid, rigid_constraint
 
 
