@@ -13,7 +13,7 @@ import unyt as u
 from unyt.array import allclose_units
 
 from gmso.core.views import PotentialFilters
-from gmso.exceptions import GMSOError, NotYetImplementedWarning
+from gmso.exceptions import NotYetImplementedWarning
 from gmso.lib.potential_templates import PotentialTemplateLibrary
 from gmso.utils.connectivity import generate_pairs_lists
 from gmso.utils.conversions import convert_ryckaert_to_opls
@@ -30,10 +30,6 @@ if has_gsd:
     import gsd.hoomd
 if has_hoomd:
     import hoomd
-
-    hoomd_version = hoomd.version.version.split(".")
-else:
-    hoomd_version = None
 
 # Note, charge will always be assumed to be in elementary_charge
 MD_UNITS = {
@@ -1107,22 +1103,10 @@ def _parse_dihedral_forces(
         },
     }
 
-    if int(hoomd_version[0]) >= 4 or (
-        int(hoomd_version[0]) == 3 and int(hoomd_version[1]) >= 8
-    ):
-        v_hoomd = "gt3.8"
-        dtype_group_map["PeriodicTorsionPotential"] = {
-            "container": hoomd.md.dihedral.Periodic,
-            "parser": _parse_periodic_dihedral,
-        }
-
-    else:
-        v_hoomd = "lt3.8"
-        # Should this be periodic, deprecated starting from 3.8.0
-        dtype_group_map["PeriodicTorsionPotential"] = {
-            "container": hoomd.md.dihedral.Harmonic,
-            "parser": _parse_periodic_dihedral,
-        }
+    dtype_group_map["PeriodicTorsionPotential"] = {
+        "container": hoomd.md.dihedral.Periodic,
+        "parser": _parse_periodic_dihedral,
+    }
 
     dihedral_forces = list()
     for group in groups:
@@ -1136,7 +1120,7 @@ def _parse_dihedral_forces(
                     base_units=base_units,
                 )
             )
-        elif v_hoomd == "gt3.8" and isinstance(container(), hoomd.md.dihedral.Periodic):
+        elif isinstance(container(), hoomd.md.dihedral.Periodic):
             dihedral_forces.extend(
                 dtype_group_map[group]["parser"](
                     container=dtype_group_map[group]["container"](),
@@ -1144,19 +1128,6 @@ def _parse_dihedral_forces(
                     expected_units_dim=expected_unitsDict[group],
                     base_units=base_units,
                 )
-            )
-        elif v_hoomd == "lt3.8" and isinstance(container(), hoomd.md.dihedral.Harmonic):
-            dihedral_forces.extend(
-                dtype_group_map[group]["parser"](
-                    container=dtype_group_map[group]["container"](),
-                    dihedrals=groups[group],
-                    expected_units_dim=expected_unitsDict[group],
-                    base_units=base_units,
-                )
-            )
-        else:
-            raise GMSOError(
-                f"Current version of HOOMD-blue, {hoomd_version}. is not supported. Please updated for version 3.8 or later."
             )
     return dihedral_forces
 
@@ -1277,24 +1248,16 @@ def _parse_improper_forces(
             base_units,
         )
 
-    if int(hoomd_version[0]) >= 4 and int(hoomd_version[1]) >= 5:
-        itype_group_map = {
-            "HarmonicImproperPotential": {
-                "container": hoomd.md.improper.Harmonic,
-                "parser": _parse_harmonic_improper,
-            },
-            "PeriodicTorsionPotential": {
-                "container": hoomd.md.improper.Periodic,
-                "parser": _parse_periodic_improper,
-            },
-        }
-    else:
-        itype_group_map = {
-            "HarmonicImproperPotential": {
-                "container": hoomd.md.improper.Harmonic,
-                "parser": _parse_harmonic_improper,
-            },
-        }
+    itype_group_map = {
+        "HarmonicImproperPotential": {
+            "container": hoomd.md.improper.Harmonic,
+            "parser": _parse_harmonic_improper,
+        },
+        "PeriodicTorsionPotential": {
+            "container": hoomd.md.improper.Periodic,
+            "parser": _parse_periodic_improper,
+        },
+    }
 
     improper_forces = list()
     for group in groups:
