@@ -13,6 +13,17 @@ if has_openmm & has_openmm_unit:
     from openmm.app import *
 
 
+def from_openmm_system(system):
+    """Convert a parmaterized OpenMM system to a GMSO topology
+
+    Parameters
+    ----------
+    system : openmm.openmm.System
+        OpenMM system to be converted to a topology
+
+    """
+
+
 def to_openmm(topology, openmm_object="topology"):
     """Convert an untyped topology object to an untyped OpenMM modeller or topology.
 
