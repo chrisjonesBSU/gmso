@@ -27,6 +27,21 @@ EDGES = {
     "improper": ((0, 1), (0, 2), (1, 2)),
 }
 
+# Build the small pattern graphs once at import time rather than on every call
+# to _detect_connections. These are static and never change.
+_CONNECTION_GRAPHS = {}
+for _type, _edges in EDGES.items():
+    _g = nx.Graph()
+    for _edge in _edges:
+        _g.add_edge(*_edge)
+    _CONNECTION_GRAPHS[_type] = _g
+
+_SORT_KEYS = {
+    "angle":    lambda a: (a[1], a[0], a[2]),
+    "dihedral": lambda d: (d[1], d[2], d[0], d[3]),
+    "improper": lambda i: (i[0], i[1], i[2], i[3]),
+}
+
 
 def identify_connections(top, index_only=False):
     """Identify all possible connections within a topology.
@@ -39,26 +54,41 @@ def identify_connections(top, index_only=False):
         If True, return atom indices that would form the actual connections
         rather than adding the connections to the topology
 
-    Notes: We are using networkx graph matching to match
-    the topology's bonding graph to smaller sub-graphs that
-    correspond to an angle, dihedral, improper etc.
-    The matching is actually done via the line-graph of the
-    topology bonding graph.
+    Notes
+    -----
+    We are using networkx graph matching to match the topology's bonding graph
+    to smaller sub-graphs that correspond to an angle, dihedral, improper etc.
+    The matching is done via the line-graph of the topology bonding graph.
+
+    The graph is built with integer site indices as nodes (not Site objects).
+    This means VF2 subgraph isomorphism operates on plain ints throughout,
+    with Site objects only touched at the entry point (building the index map)
+    and exit point (_add_connections resolving indices back to Site objects).
+
     [ahy]: IIRC we chose to use line-graph as opposed the actual graph
     because the graph-matching (on the actual graph) would miss certain
     angles/dihedrals/impropers if there were cycles or bridge bonds
-    that would effectively hide the angle/dihedral/dihedral
+    that would effectively hide the angle/dihedral/improper
     """
+    # Build a site -> index map once. top._sites is an IndexedSet so
+    # .index() is O(1), but we still pay a Python hash per bond member
+    # on every call. Building this map upfront means bond iteration below
+    # pays one dict lookup per member instead.
+    site_index_map = {site: i for i, site in enumerate(top.sites)}
+
+    # Integer-node graph: VF2 now compares ints, not Site objects.
+    # Line-graph nodes become (int, int) tuples instead of (Site, Site).
     compound = nx.Graph()
-
-    for b in top.bonds:
-        compound.add_edge(b.connection_members[0], b.connection_members[1])
-
+    compound.add_edges_from(
+        (site_index_map[b.connection_members[0]], site_index_map[b.connection_members[1]])
+        for b in top.bonds
+    )
     compound_line_graph = nx.line_graph(compound)
 
-    angle_matches = _detect_connections(compound_line_graph, top, type_="angle")
-    dihedral_matches = _detect_connections(compound_line_graph, top, type_="dihedral")
-    improper_matches = _detect_connections(compound_line_graph, top, type_="improper")
+    # _detect_connections no longer needs `top` — all nodes are already ints.
+    angle_matches    = _detect_connections(compound_line_graph, type_="angle")
+    dihedral_matches = _detect_connections(compound_line_graph, type_="dihedral")
+    improper_matches = _detect_connections(compound_line_graph, type_="improper")
 
     if not index_only:
         for conn_matches, conn_type in zip(
@@ -87,198 +117,165 @@ def _add_connections(top, matches, conn_type):
             key = frozenset([bond, tuple(reversed(bond))])
             bonds.append(top._unique_connections[key])
         to_add_conn = CONNS[conn_type](connection_members=cmembers, bonds=tuple(bonds))
-        # import pdb; pdb.set_trace()
         top.add_connection(to_add_conn, update_types=False)
 
 
-def _detect_connections(compound_line_graph, top, type_="angle"):
-    """Detect available connections in the topology based on bonds."""
-    connection = nx.Graph()
-    for edge in EDGES[type_]:
-        assert len(edge) == 2, "Edges should be of length 2"
-        connection.add_edge(edge[0], edge[1])
+def _detect_connections(compound_line_graph, type_="angle"):
+    """Detect available connections in the topology based on bonds.
 
-    matcher = nx.algorithms.isomorphism.GraphMatcher(compound_line_graph, connection)
+    Parameters
+    ----------
+    compound_line_graph : nx.Graph
+        Line graph of the topology's bond graph, built with integer site
+        indices as nodes (so line-graph nodes are (int, int) edge-tuples).
+    type_ : str
+        One of 'angle', 'dihedral', 'improper'.
 
-    formatter_fns = {
-        "angle": _format_subgraph_angle,
+    Returns
+    -------
+    list of tuples
+        Each tuple is a sequence of integer site indices forming the
+        detected connection, canonicalised and sorted.
+    """
+    # Use the pre-built pattern graph (module-level constant, built once).
+    matcher = nx.algorithms.isomorphism.GraphMatcher(
+        compound_line_graph, _CONNECTION_GRAPHS[type_]
+    )
+
+    # Hoist the formatter lookup outside the loop — avoids a dict lookup
+    # on every iteration of what can be a very large match set.
+    formatter_fn = {
+        "angle":    _format_subgraph_angle,
         "dihedral": _format_subgraph_dihedral,
         "improper": _format_subgraph_improper,
-    }
+    }[type_]
 
     conn_matches = IndexedSet()
     for m in matcher.subgraph_isomorphisms_iter():
-        new_connection = formatter_fns[type_](m, top)
-        conn_matches.add(new_connection)
+        match = formatter_fn(m)
+        if match is None:           # improper can return None for 3-rings
+            continue
 
-    if conn_matches:
-        conn_matches = _trim_duplicates(conn_matches)
-
-    # Do more sorting of individual connection
-    sorted_conn_matches = list()
-    for match in conn_matches:
+        # Canonicalise here so the IndexedSet deduplicates correctly,
+        # eliminating the need for a separate _trim_duplicates pass.
         if type_ in ("angle", "dihedral"):
-            if match[0] < match[-1]:
-                sorted_conn = match
-            else:
-                sorted_conn = match[::-1]
+            if match[0] > match[-1]:
+                match = match[::-1]
         elif type_ == "improper":
-            sorted_conn = [match[0]] + sorted(match[1:])
-        sorted_conn_matches.append(sorted_conn)
+            match = (match[0],) + tuple(sorted(match[1:]))
 
-    # Final sorting the whole list
-    if type_ == "angle":
-        return sorted(
-            sorted_conn_matches,
-            key=lambda angle: (
-                angle[1],
-                angle[0],
-                angle[2],
-            ),
-        )
-    elif type_ == "dihedral":
-        return sorted(
-            sorted_conn_matches,
-            key=lambda dihedral: (
-                dihedral[1],
-                dihedral[2],
-                dihedral[0],
-                dihedral[3],
-            ),
-        )
-    elif type_ == "improper":
-        return sorted(
-            sorted_conn_matches,
-            key=lambda improper: (
-                improper[0],
-                improper[1],
-                improper[2],
-                improper[3],
-            ),
-        )
+        conn_matches.add(match)
+
+    return sorted(conn_matches, key=_SORT_KEYS[type_])
 
 
 def _get_sorted_by_n_connections(m):
-    """Return sorted by n connections for the matching graph."""
+    """Return nodes sorted by degree for the matched subgraph.
+
+    Parameters
+    ----------
+    m : dict
+        Keys are line-graph nodes ((int, int) edge tuples from the compound
+        line graph). Values are the corresponding pattern-graph nodes.
+
+    Returns
+    -------
+    sorted_nodes : list of int
+        Unique site-index nodes, sorted ascending by their degree in the
+        reconstructed bond subgraph (lowest-degree first).
+    small : nx.Graph
+        The reconstructed bond subgraph for the match.
+    """
     small = nx.Graph()
-    for k, v in m.items():
+    for k in m:         # keys are (int, int) bond-edge tuples
         small.add_edge(k[0], k[1])
     return sorted(small.adj, key=lambda x: len(small[x])), small
 
 
-def _format_subgraph_angle(m, top):
+def _format_subgraph_angle(m):
     """Format the angle subgraph.
 
-    Since we are matching compound line graphs,
-    back out the actual nodes, not just the edges
+    With integer-node graphs the line-graph nodes are (int, int) tuples,
+    so _get_sorted_by_n_connections returns plain ints directly — no
+    top.get_index() call needed.
 
     Parameters
     ----------
     m : dict
-        keys are the compound line graph nodes
-        Values are the sub-graph matches (to the angle, dihedral, or improper)
-    top : gmso.Topology
-        The original Topology
+        Keys are compound line-graph nodes ((int, int) tuples).
+        Values are the pattern-graph nodes they map to.
 
     Returns
     -------
-    connection : list of nodes, in order of bonding
-        (start, middle, end)
+    tuple of int : (end0, middle, end1) site indices, ends sorted ascending.
     """
-    (sort_by_n_connections, _) = _get_sorted_by_n_connections(m)
-    ends = sorted(
-        [sort_by_n_connections[0], sort_by_n_connections[1]],
-        key=lambda x: top.get_index(x),
-    )
+    sort_by_n_connections, _ = _get_sorted_by_n_connections(m)
+    # Two end nodes (degree-1) and one middle node (degree-2).
+    # Ends are already ints; sort them so canonicalisation is stable.
+    end0, end1 = sorted([sort_by_n_connections[0], sort_by_n_connections[1]])
     middle = sort_by_n_connections[2]
-    return (
-        top.get_index(ends[0]),
-        top.get_index(middle),
-        top.get_index(ends[1]),
-    )
+    return (end0, middle, end1)
 
 
-def _format_subgraph_dihedral(m, top):
+def _format_subgraph_dihedral(m):
     """Format the dihedral subgraph.
 
-    Since we are matching compound line graphs,
-    back out the actual nodes, not just the edges
-
     Parameters
     ----------
     m : dict
-        keys are the compound line graph nodes
-        Values are the sub-graph matches (to the angle, dihedral, or improper)
-    top : gmso.Topology
-        The original Topology
+        Keys are compound line-graph nodes ((int, int) tuples).
 
     Returns
     -------
-    connection : list of nodes, in order of bonding
-        (start, mid1, mid2, end)
+    tuple of int : (start, mid1, mid2, end) site indices.
     """
-    (sort_by_n_connections, small) = _get_sorted_by_n_connections(m)
+    sort_by_n_connections, small = _get_sorted_by_n_connections(m)
     start = sort_by_n_connections[0]
+    # Determine which of the two middle nodes is adjacent to `start`.
     if sort_by_n_connections[2] in small.neighbors(start):
         mid1 = sort_by_n_connections[2]
         mid2 = sort_by_n_connections[3]
     else:
         mid1 = sort_by_n_connections[3]
         mid2 = sort_by_n_connections[2]
-
     end = sort_by_n_connections[1]
-    return (
-        top.get_index(start),
-        top.get_index(mid1),
-        top.get_index(mid2),
-        top.get_index(end),
-    )
+    return (start, mid1, mid2, end)
 
 
-def _format_subgraph_improper(m, top):
+def _format_subgraph_improper(m):
     """Format the improper dihedral subgraph.
-
-    Since we are matching compound line graphs,
-    back out the actual nodes, not just the edges
 
     Parameters
     ----------
     m : dict
-        keys are the compound line graph nodes
-        Values are the sub-graph matches (to the angle, dihedral, or improper)
-    top : gmso.Topology
-        The original Topology
+        Keys are compound line-graph nodes ((int, int) tuples).
 
     Returns
     -------
-    connection : list of nodes, in order of bonding
-        (central, branch1, branch2, branch3)
+    tuple of int : (central, branch1, branch2, branch3) site indices,
+    or None if the match is a spurious 3-ring.
 
     Notes
     -----
-    Given the way impropers are matched, sometimes a cyclic 3-ring system gets returned
+    Given the way impropers are matched, sometimes a cyclic 3-ring system
+    is returned — those are filtered out by returning None.
     """
-    (sort_by_n_connections, _) = _get_sorted_by_n_connections(m)
+    sort_by_n_connections, _ = _get_sorted_by_n_connections(m)
     if len(sort_by_n_connections) == 4:
         central = sort_by_n_connections[3]
-        branch1, branch2, branch3 = sorted(
-            sort_by_n_connections[:3],
-            key=lambda x: top.get_index(x),
-        )
-        return (
-            top.get_index(central),
-            top.get_index(branch1),
-            top.get_index(branch2),
-            top.get_index(branch3),
-        )
+        # Branches are ints so sorted() works correctly and cheaply.
+        branch1, branch2, branch3 = sorted(sort_by_n_connections[:3])
+        return (central, branch1, branch2, branch3)
     return None
 
 
 def _trim_duplicates(all_matches):
     """Remove redundant sub-graph matches.
 
-    Is there a better way to do this? Like when we format the subgraphs,
-    can we impose an ordering so it's easier to eliminate redundant matches?
+    .. deprecated::
+        Canonicalisation is now applied inside _detect_connections before
+        insertion into the IndexedSet, so this function is no longer called
+        by the main pipeline. Retained for any external callers.
     """
     trimmed_list = IndexedSet()
     for match in all_matches:
@@ -286,6 +283,10 @@ def _trim_duplicates(all_matches):
             trimmed_list.add(match)
     return trimmed_list
 
+
+# ---------------------------------------------------------------------------
+# Everything below this line is unchanged from the original module.
+# ---------------------------------------------------------------------------
 
 def generate_pairs_lists(
     top, molecule=None, sort_key=None, refer_from_scaling_factor=False
