@@ -189,7 +189,8 @@ def _enumerate_dihedrals(adj):
                 for d in adj[c]:
                     if d == b:
                         continue
-                    # Canonicalise: smaller terminal first.
+                    if d == a:
+                        continue
                     if a < d:
                         matches.add((a, b, c, d))
                     else:
