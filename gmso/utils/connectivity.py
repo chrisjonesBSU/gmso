@@ -346,10 +346,6 @@ def _trim_duplicates(all_matches):
     return trimmed_list
 
 
-# ---------------------------------------------------------------------------
-# Everything below this line is unchanged from the original module.
-# ---------------------------------------------------------------------------
-
 def generate_pairs_lists(
     top, molecule=None, sort_key=None, refer_from_scaling_factor=False
 ):
