@@ -22,15 +22,6 @@ from gmso.exceptions import MissingParameterError
 
 CONNS = {"angle": Angle, "dihedral": Dihedral, "improper": Improper}
 
-# EDGES is retained as a public constant; it is no longer used internally
-# for detection (which now uses direct adjacency enumeration) but may be
-# referenced by external callers.
-EDGES = {
-    "angle": ((0, 1),),
-    "dihedral": ((0, 1), (1, 2)),
-    "improper": ((0, 1), (0, 2), (1, 2)),
-}
-
 
 def identify_connections(top, index_only=False):
     """Identify all possible connections within a topology.
@@ -50,28 +41,30 @@ def identify_connections(top, index_only=False):
     This replaces the previous approach of VF2 subgraph isomorphism on
     the line graph of the bond graph.
 
-    The key insight is that the patterns being searched for — angles,
-    dihedrals, impropers — are simple enough that they can be enumerated
-    in O(E * max_degree) time by walking the adjacency structure directly:
+    The patterns being searched for (bonds, angles, dihedrals, impropers)
+    are simple enough that they can be enumerated by walking the
+    adjacency structure directly, instead of sub-graph matching:
 
-    - Angle   (a-b-c): for each node b, enumerate pairs of its neighbors.
-    - Dihedral (a-b-c-d): for each edge (b,c), enumerate (neighbor of b) x
-                          (neighbor of c), excluding the b-c bond itself.
-    - Improper (central; b1,b2,b3): for each node with degree >= 3,
-                          enumerate all combinations of 3 neighbors.
+    - Angle (a-b-c):
+        for each node b, enumerate pairs of its neighbors.
+    - Dihedral (a-b-c-d):
+        for each edge (b,c), enumerate (neighbor of b) x
+        (neighbor of c), excluding the b-c bond itself.
+    - Improper (central; b1,b2,b3):
+        for each node with degree >= 3,
+        enumerate all combinations of 3 neighbors.
 
     Site objects are only touched at two boundaries:
       - Entry: building the site_index_map (site -> int).
       - Exit:  _add_connections resolving int indices back to Site objects.
+
     Everything in between operates on plain Python ints.
     """
     # Build site -> index map once up front. top._sites is an IndexedSet
-    # (O(1) .index()), but constructing this dict means the bond loop below
-    # pays a single dict lookup per member rather than a method call.
     site_index_map = {site: i for i, site in enumerate(top.sites)}
 
     # Build an integer-node adjacency dict directly from bonds.
-    # Using dict[int, set[int]] rather than nx.Graph avoids all networkx
+    # Using dict[int, set[int]] rather than nx.Graph to avoid networkx
     # per-node overhead during the enumeration loops.
     adj: dict[int, set[int]] = {}
     for b in top.bonds:
@@ -125,7 +118,7 @@ def _enumerate_angles(adj):
     For each node b with at least 2 neighbors, we enumerate all unordered
     pairs of those neighbors.
 
-    Canonicalisation: smaller terminal index first, so (a, b, c) with a < c.
+    Canonicalization: smaller terminal index first, so (a, b, c) with a < c.
     This is imposed at construction time so the set handles deduplication.
 
     Parameters
@@ -144,7 +137,7 @@ def _enumerate_angles(adj):
         if len(neighbors) < 2:
             continue
         for a, c in combinations(neighbors, 2):
-            # Canonicalise: smaller end first.
+            # Smaller end first.
             if a < c:
                 matches.add((a, b, c))
             else:
@@ -180,8 +173,7 @@ def _enumerate_dihedrals(adj):
     for b, b_neighbors in adj.items():
         for c in b_neighbors:
             if c <= b:
-                # Process each bond once; the c > b side handles both
-                # orientations via canonicalisation below.
+                # Process each bond once, only add when c > b
                 continue
             for a in b_neighbors:
                 if a == c:
@@ -205,7 +197,7 @@ def _enumerate_impropers(adj):
     bonded to all three of b1, b2, b3. For each node with degree >= 3,
     we enumerate all combinations of 3 neighbors as the branch atoms.
 
-    Canonicalisation: branches are sorted ascending. Central node identity
+    Canonicalization: branches are sorted ascending. Central node identity
     is unambiguous so no further orientation handling is needed.
 
     Parameters
