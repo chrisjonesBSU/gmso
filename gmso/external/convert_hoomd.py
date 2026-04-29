@@ -58,6 +58,7 @@ AKMA_UNITS = {
 def get_cell_nlist(top, buffer=0.4):
     """Create a cell neighborlist for use in hoomd-blue based on top.scaling_factors"""
     nb_scaling_factors, coul_scaling_factors = top.scaling_factors
+    hasRigid = any(site.molecule.isrigid for site in top.sites)
     if all(top.scaling_factors[0] == top.scaling_factors[1]):
         outVals = None
     else:
@@ -71,6 +72,8 @@ def get_cell_nlist(top, buffer=0.4):
                 exclusions.append("bond")
             else:
                 exclusions.append(f"1-{i + 2}")
+        if hasRigid:
+            exclusions.append("body")
         if outVals is None:
             outVals = hoomd.md.nlist.Cell(exclusions=exclusions, buffer=buffer)
             return outVals, outVals  # return same neighborlist twice
@@ -1163,7 +1166,22 @@ def _parse_lj(top, atypes, combining_rule, r_cut, nlist, scaling_factors):
             "epsilon": comb_epsilon,
         }
         lj.params[type_name] = calculated_params[type_name]
-        lj.r_cut[(type_name)] = r_cut
+        lj.r_cut[type_name] = r_cut
+
+    # add rigid body 0 params
+    rigidSet = set()
+    for site in top.sites:
+        if site.molecule.isrigid and site.molecule.name not in rigidSet:
+            rigidSet.add(site.molecule.name)
+            for mol in atypes:
+                type_name = tuple(sorted([site.molecule.name, mol.name]))
+                lj.params[type_name] = {"sigma": 0.0, "epsilon": 0.0}
+                lj.r_cut[type_name] = r_cut
+            lj.params[(site.molecule.name, site.molecule.name)] = {
+                "sigma": 0.0,
+                "epsilon": 0.0,
+            }
+            lj.r_cut[(site.molecule.name, site.molecule.name)] = r_cut
 
     # Handle 1-2, 1-3, and 1-4 scaling
     # TODO: Figure out a more general way to do this
