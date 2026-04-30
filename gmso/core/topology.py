@@ -1262,7 +1262,7 @@ class Topology(object):
         molecules = set()
         for site in self.sites:
             molecules.add(site.molecule.name)
-    
+
         # Figure out how to handle the tags
         for mol in molecules:
             mol_slice = slice_topology_by_molecule(topology=self, molecule_tag=0)
@@ -1270,8 +1270,6 @@ class Topology(object):
             openff_mol.assign_partial_charges(method=method)
             for atom in openff_mol.atoms:
                 print(atom.partial_charge)
-
-
 
     def write_forcefield(self, filename, overwrite=False):
         """Save an xml file for all parameters found in the topology.

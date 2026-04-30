@@ -1,6 +1,8 @@
 """Calculate charges for a gmso Topology."""
+
 from gmso.external.convert_openmm import to_openff_molecule
 from gmso.utils.slicing import slice_topology_by_molecule
+
 
 def calculate_charges(topology, method="am1bcc", slice_by="Molecule"):
     # Get all of the moleucles types in the topology

@@ -1,5 +1,6 @@
 import gmso
 
+
 def slice_topology_by_molecule(topology, molecule_tag, molecule_number=None):
     """Create a Topology that contains a subset of molecules from another Topology.
 
