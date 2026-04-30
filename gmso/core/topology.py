@@ -1251,6 +1251,23 @@ class Topology(object):
 
         return index
 
+    def calculate_charges(self, method="am1bcc", slice_by="Molecule"):
+        print("Not implemented yet. We are working on it.")
+        # Get all of the moleucles types in the topology
+        molecules = set()
+        for site in self.sites:
+            molecules.add(site.molecule.name)
+    
+        # Figure out how to handle the tags
+        for mol in molecules:
+            mol_slice = slice_topology_by_molecule(topology=self, molecule_tag=0)
+            openff_mol = to_openff_molecule(mol_slice)
+            openff_mol.assign_partial_charges(method=method)
+            for atom in openff_mol.atoms:
+                print(atom.partial_charge)
+
+
+
     def write_forcefield(self, filename, overwrite=False):
         """Save an xml file for all parameters found in the topology.
 

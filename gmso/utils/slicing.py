@@ -1,5 +1,4 @@
-from gmso.core.topology import Topology
-
+import gmso
 
 def slice_topology_by_molecule(topology, molecule_tag, molecule_number=None):
     """Create a Topology that contains a subset of molecules from another Topology.
@@ -67,7 +66,7 @@ def slice_by_sites(topology, sites):
     topology : gmso.core.topology.Topology
         The topology being sliced.
     """
-    new_topology = Topology()
+    new_topology = gmso.core.topology.Topology()
 
     connections = set()
     for site in sites:
