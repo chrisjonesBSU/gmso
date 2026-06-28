@@ -1122,7 +1122,7 @@ def parse_cvff_style_improper(improper_type):
     parametersList = []
     namesList = ["k", "n", "phi_eq"]
     for k in namesList:
-        parametersList.append(improper_type.parameters[k])
+        parametersList.append(improper_type.parameters[k].flatten()[0])
     return parametersList, namesList
 
 
@@ -1131,7 +1131,7 @@ def parse_harmonic_style_improper(improper_type):
     parametersList = []
     namesList = ["k", "phi_eq"]
     for k in namesList:
-        parametersList.append(improper_type.parameters[k])
+        parametersList.append(improper_type.parameters[k].flatten()[0])
     return parametersList, namesList
 
 
