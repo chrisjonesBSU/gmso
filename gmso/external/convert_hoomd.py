@@ -1807,7 +1807,8 @@ def _parse_periodic_improper(
         if "*" in members:
             members = sort_by_types(itype)
         container.params["-".join(members)] = {
-            "k": float(itype.parameters["k"].flatten()[0].to_value()) * 2,  # convert to k/2
+            "k": float(itype.parameters["k"].flatten()[0].to_value())
+            * 2,  # convert to k/2
             "chi0": float(itype.parameters["phi_eq"].flatten()[0].to_value()),
             "n": int(itype.parameters["n"].flatten()[0].to_value()),
             "d": float(itype.parameters["d"].flatten()[0].to_value())

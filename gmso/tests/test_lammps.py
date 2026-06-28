@@ -593,9 +593,7 @@ class TestLammpsWriter(BaseTest):
 
         benzene = mb.load("c1ccccc1", smiles=True)
         benzene.box = mb.Box([5, 5, 5])
-        top = apply(
-            benzene.to_gmso(), gaff_forcefield, identify_connections=True
-        )
+        top = apply(benzene.to_gmso(), gaff_forcefield, identify_connections=True)
         assert top.improper_types
 
         top.save("gaff.lammps", overwrite=True)
